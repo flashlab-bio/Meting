@@ -57,7 +57,6 @@ class Meting
     public function proxy($value)
     {
         $this->proxy = $value;
-
         return $this;
     }
 
@@ -144,13 +143,20 @@ class Meting
     {
         $raw = json_decode($raw, true);
         if (!empty($rule)) {
-            $raw = $this->pickup($raw, $rule);
+            $keyrule = "";
+            foreach (explode(':', $rule) as $i => $r) {
+                if ($i == 0) {
+                    $keyrule = $r;
+                } else {
+                    $result['info'] = $this->pickup($raw, $r);
+                }
+            }
+            $raw = $this->pickup($raw, $keyrule);
         }
         if (!isset($raw[0]) && count($raw)) {
             $raw = array($raw);
         }
-        $result = array_map(array($this, 'format_'.$this->server), $raw);
-
+        $result['songs'] = array_map(array($this, 'format_'.$this->server), $raw);
         return json_encode($result);
     }
 
@@ -179,7 +185,7 @@ class Meting
                 'body'   => array(
                     'format'   => 'json',
                     'p'        => isset($option['page']) ? $option['page'] : 1,
-                    'n'        => isset($option['limit']) ? $option['limit'] : 30,
+                    'n'        => isset($option['limit']) ? $option['limit'] : 50,
                     'w'        => $keyword,
                     'aggr'     => 1,
                     'lossless' => 1,
@@ -351,7 +357,7 @@ class Meting
                     'format'   => 'json',
                     'newsong'  => 1,
                 ),
-                'format' => 'data.getSongInfo',
+                'format' => 'data.getSongInfo:data.getAlbumDesc.Falbum_desc',
             );
             break;
             case 'xiami':
@@ -365,7 +371,7 @@ class Meting
                     'r' => 'mtop.alimusic.music.albumservice.getalbumdetail',
                 ),
                 'encode' => 'xiami_sign',
-                'format' => 'data.data.albumDetail.songs',
+                'format' => 'data.data.albumDetail.songs:data.data.albumDetail.description',
             );
             break;
             case 'kugou':
@@ -517,7 +523,7 @@ class Meting
                     'newsong'  => 1,
                     'platform' => 'jqspaframe.json',
                 ),
-                'format' => 'data.cdlist.0.songlist',
+                'format' => 'data.cdlist.0.songlist:data.cdlist.0.desc',
             );
             break;
             case 'xiami':
@@ -536,7 +542,7 @@ class Meting
                     'r' => 'mtop.alimusic.music.list.collectservice.getcollectdetail',
                 ),
                 'encode' => 'xiami_sign',
-                'format' => 'data.data.collectDetail.songs',
+                'format' => 'data.data.collectDetail.songs:data.data.collectDetail.cleanDesc',
             );
             break;
             case 'kugou':
@@ -575,6 +581,7 @@ class Meting
 
     public function url($id, $br = 320)
     {
+        $g_tk = mt_rand() % 10000000;
         switch ($this->server) {
             case 'netease':
             $api = array(
@@ -590,13 +597,44 @@ class Meting
             break;
             case 'tencent':
             $api = array(
-                'method' => 'GET',
-                'url'    => 'https://c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg',
-                'body'   => array(
-                    'songmid'  => $id,
-                    'platform' => 'yqq',
-                    'format'   => 'json',
-                ),
+                'method' => 'POST',
+                'url'    => 'http://u.y.qq.com/cgi-bin/musicu.fcg',
+                'body'   => json_encode(array(
+                    'comm' => array(
+                        'g_tk' => $g_tk,
+                        'uin' => 0,
+                        'format' => 'json',
+                        'inCharset' => 'utf-8',
+                        'outCharset' => 'utf-8',
+                        'notice' => 0,
+                        'platform' => 'h5',
+                        'needNewCode' => 1
+                    ),
+                    'detail'  => array(
+                        'module' => 'music.pf_song_detail_svr',
+                        'method' => 'get_song_detail',
+                        'param' => array(
+                            'song_id' => (int)$id
+                        ),
+                    ),
+                    'simsongs' => array(
+                        'module' => 'rcmusic.similarSongRadioServer',
+                        'method' => 'get_simsongs',
+                        'param' => array(
+                            'songid' => (int)$id
+                        ),
+                    ),
+                    'gedan' => array(
+                        'module' => 'music.mb_gedan_recommend_svr',
+                        'method' => 'get_related_gedan',
+                        'param' => array(
+                            'song_id' => (int)$id,
+                            'sin' => 0,
+                            'last_id' => 0,
+                            'song_type' => 1
+                        ),
+                    ),
+                )),
                 'decode' => 'tencent_url',
             );
             break;
@@ -658,6 +696,30 @@ class Meting
         }
         $this->temp['br'] = $br;
 
+        return $this->exec($api);
+    }
+
+    public function demo($id)
+    {
+        $guid = rand(1,2147483647)*(microtime()*1000)%10000000000;
+        switch ($this->server) {
+            case 'tencent':
+            $api = array(
+                'method' => 'GET',
+                'url'    => 'https://c.y.qq.com/base/fcgi-bin/fcg_music_express_mobile3.fcg',
+                'body'   => array(
+                    'format'  => 'json',
+                    'cid'     => 205361747,
+                    'uin'     => 0,
+                    'songmid' => $id,
+                    'filename'=> 'C400'.$id.'.m4a',
+                    'guid'    => $guid
+                ),
+                'decode' => 'tencent_demo',
+            );
+            $this->temp['guid'] = $guid;
+            break;
+        }
         return $this->exec($api);
     }
 
@@ -791,7 +853,7 @@ class Meting
             case 'tencent':
             return array(
                 'Referer'         => 'http://y.qq.com',
-                'Cookie'          => 'pgv_pvi=22038528; pgv_si=s3156287488; pgv_pvid=5535248600; yplayer_open=1; ts_last=y.qq.com/portal/player.html; ts_uid=4847550686; yq_index=0; qqmusic_fromtag=66; player_exist=1',
+                'Cookie'          => 'pgv_pvi=7999173004; pgv_si=s7787487232; pgv_pvid=8655178290; yplayer_open=1; ts_last=y.qq.com/portal/player.html; ts_uid=7426846409; yq_index=0; qqmusic_fromtag=66; player_exist=1',
                 'User-Agent'      => 'QQ%E9%9F%B3%E4%B9%90/54409 CFNetwork/901.1 Darwin/17.6.0 (x86_64)',
                 'Accept'          => '*/*',
                 'Accept-Language' => 'zh-CN,zh;q=0.8,gl;q=0.6,zh-TW;q=0.4',
@@ -1002,9 +1064,22 @@ class Meting
         return json_encode($url);
     }
 
+    private function tencent_demo($result)
+    {
+        $data = json_decode($result, true);
+        return json_encode(array(
+            'url'  => isset($data['data']['items'][0]['vkey']) ? "http://dl.stream.qqmusic.qq.com/".$data['data']['items'][0]['filename'].
+            "?uin=0&fromtag=66&vkey=".$data['data']['items'][0]['vkey']."&guid=".$this->temp['guid'] : '',
+            'filename' => isset($data['data']['items'][0]['filename']) ? $data['data']['items'][0]['filename'] : '',
+            )
+        );
+    }
+
     private function tencent_url($result)
     {
         $data = json_decode($result, true);
+        // echo json_encode($data);
+        $track = $data['detail']['data']['track_info'];
         $guid = mt_rand() % 10000000000;
 
         $type = array(
@@ -1015,7 +1090,6 @@ class Meting
             array('size_48aac', 48, 'C200', 'm4a'),
             array('size_24aac', 24, 'C100', 'm4a'),
         );
-
         $payload = array(
             'req_0' => array(
                 'module' => 'vkey.GetVkeyServer',
@@ -1031,11 +1105,10 @@ class Meting
                 ),
             ),
         );
-
         foreach ($type as $vo) {
-            $payload['req_0']['param']['songmid'][] = $data['data'][0]['mid'];
-            $payload['req_0']['param']['filename'][] = $vo[2].$data['data'][0]['file']['media_mid'].'.'.$vo[3];
-            $payload['req_0']['param']['songtype'][] = $data['data'][0]['type'];
+            $payload['req_0']['param']['songmid'][] = $track['mid'];
+            $payload['req_0']['param']['filename'][] = $vo[2].$data['file']['media_mid'].'.'.$vo[3];
+            $payload['req_0']['param']['songtype'][] = $vo[3];
         }
 
         $api = array(
@@ -1070,6 +1143,11 @@ class Meting
                 'br'   => -1,
             );
         }
+        $url['track_info'] = $this->format_tencent($track);
+        $url['ext']['gedan'] = $data['gedan']['data']['vec_gedan'];
+        $url['ext']['simsongs'] = $data['simsongs']['data']['songInfoList'];
+        $lrc_section = end($data['detail']['data']['info']);
+        $url['lyrics'] = $lrc_section['content'][0]['value'];
 
         return json_encode($url);
     }
@@ -1294,17 +1372,17 @@ class Meting
             $data = $data['musicData'];
         }
         $result = array(
-            'id'       => $data['mid'],
+            'mid'      => $data['mid'],
             'name'     => $data['name'],
-            'artist'   => array(),
+            'artists'  => array(),
             'album'    => trim($data['album']['title']),
+            'album_id' => $data['album']['mid'],
             'pic_id'   => $data['album']['mid'],
-            'url_id'   => $data['mid'],
-            'lyric_id' => $data['mid'],
+            'id'       => $data['id'],
             'source'   => 'tencent',
         );
         foreach ($data['singer'] as $vo) {
-            $result['artist'][] = $vo['name'];
+            $result['artists'][] = array('id'=>$vo['mid'],'name'=>$vo['name']);
         }
 
         return $result;
@@ -1313,17 +1391,20 @@ class Meting
     private function format_xiami($data)
     {
         $result = array(
-            'id'       => $data['songId'],
-            'name'     => $data['songName'],
-            'artist'   => array(),
-            'album'    => $data['albumName'],
-            'pic_id'   => $data['songId'],
-            'url_id'   => $data['songId'],
-            'lyric_id' => $data['songId'],
-            'source'   => 'xiami',
+            'id'         => $data['songId'],
+            'name'       => $data['songName'],
+            'artist_id'  => $data['artistId'],
+            'artists'    => array(),
+            'artist'     => $data['artistName'],
+            'artist_pic' => $data['artistLogo'],
+            'album_id'   => $data['albumId'],
+            'album'      => $data['albumName'],
+            'album_pic'  => $data['albumLogo'],
+            'listen_file' => end($data['listenFiles'])['listenFile'],
+            'source'     => 'xiami',
         );
         foreach ($data['singerVOs'] as $vo) {
-            $result['artist'][] = $vo['artistName'];
+            $result['artists'][] = $vo['artistName'];
         }
 
         return $result;
